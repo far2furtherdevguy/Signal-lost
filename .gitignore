@@ -1,0 +1,13 @@
+# Flutter/Dart
+flutter/.dart_tool/
+flutter/build/
+flutter/.flutter-plugins*
+flutter/.packages
+flutter/.idea/
+
+# Node
+server/node_modules/
+server/data/
+
+# OS
+.DS_Store

@@ -1,0 +1,9 @@
+services:
+  - type: web
+    name: signal-lost-server
+    runtime: node
+    rootDir: server
+    plan: free
+    buildCommand: npm install
+    startCommand: node index.js
+    healthCheckPath: /health
