@@ -1,0 +1,55 @@
+name: Build Flutter APK
+
+on:
+  push:
+    branches: [ main ]
+    paths:
+      - 'flutter/**'
+      - '.github/workflows/**'
+  workflow_dispatch:
+
+jobs:
+  build-apk:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-java@v4
+        with:
+          distribution: 'temurin'
+          java-version: '17'
+
+      - uses: subosito/flutter-action@v2
+        with:
+          channel: 'stable'
+          cache: true
+
+      - name: Get dependencies
+        working-directory: flutter
+        run: flutter pub get
+
+      - name: Analyze
+        working-directory: flutter
+        run: flutter analyze --no-fatal-infos
+
+      - name: Build APK
+        working-directory: flutter
+        run: |
+          flutter build apk --release             --dart-define=SERVER_URL=${{ vars.SERVER_URL || 'ws://localhost:8080' }}
+
+      - name: Upload APK artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: signal-lost-apk
+          path: flutter/build/app/outputs/flutter-apk/app-release.apk
+          retention-days: 30
+
+      - name: Create GitHub Release with APK
+        if: github.event_name == 'workflow_dispatch'
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: v${{ github.run_number }}
+          name: Signal Lost v${{ github.run_number }}
+          files: flutter/build/app/outputs/flutter-apk/app-release.apk
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
