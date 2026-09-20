@@ -1,0 +1,126 @@
+name: Build Flutter APK
+
+on:
+  push:
+    branches: [ main ]
+    paths:
+      - 'flutter/**'
+      - '.github/workflows/**'
+  workflow_dispatch:
+
+jobs:
+  build-apk:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-java@v4
+        with:
+          distribution: 'temurin'
+          java-version: '17'
+
+      - uses: subosito/flutter-action@v2
+        with:
+          channel: 'stable'
+          cache: true
+
+      # Cache Gradle deps so Maven Central isn't hammered on every run
+      # (shared CI IPs get HTTP 429 rate-limited without this).
+      - name: Cache Gradle
+        uses: actions/cache@v4
+        with:
+          path: |
+            ~/.gradle/caches
+            ~/.gradle/wrapper
+          key: gradle-${{ runner.os }}-${{ hashFiles('flutter/android/**/*.gradle*', 'flutter/android/**/gradle-wrapper.properties', 'flutter/pubspec.yaml') }}
+          restore-keys: |
+            gradle-${{ runner.os }}-
+
+      - name: Get dependencies
+        working-directory: flutter
+        run: flutter pub get
+
+      # We only keep lib/ + pubspec.yaml in the repo (no local setup),
+      # so generate the Android host project on the runner.
+      - name: Generate Android scaffolding
+        working-directory: flutter
+        run: |
+          flutter create . --org com.signallost --project-name signal_lost --platforms android
+          rm -rf test   # remove default template test (references template app class)
+
+      # flutter create only grants INTERNET in the debug manifest -
+      # release APKs need it in the main manifest or the app cannot
+      # open any network connection. The permission must go AFTER the
+      # closing '>' of the opening <manifest ...> tag (not inside it).
+      - name: Grant INTERNET permission (release)
+        working-directory: flutter
+        run: |
+          python3 - <<'EOF'
+          import re
+          p = 'android/app/src/main/AndroidManifest.xml'
+          s = open(p).read()
+          if 'android.permission.INTERNET' not in s:
+              s = re.sub(
+                  r'(<manifest[^>]*>)',
+                  r'\1\n    <uses-permission android:name="android.permission.INTERNET"/>',
+                  s,
+                  count=1,
+              )
+              open(p, 'w').write(s)
+              print('INTERNET permission injected')
+          else:
+              print('INTERNET permission already present')
+          EOF
+
+      - name: Show manifest (sanity check)
+        working-directory: flutter
+        run: cat android/app/src/main/AndroidManifest.xml
+
+      - name: Validate manifest XML
+        working-directory: flutter
+        run: python3 -c "import xml.dom.minidom as m; m.parse('android/app/src/main/AndroidManifest.xml'); print('Manifest is valid XML')"
+
+      - name: Analyze
+        working-directory: flutter
+        run: flutter analyze --no-fatal-infos
+
+      # Retry only on network-looking failures (e.g. HTTP 429 from Maven
+      # Central / Gradle Plugin Portal). Real build errors fail immediately.
+      - name: Build APK
+        working-directory: flutter
+        env:
+          SERVER_URL: ${{ vars.SERVER_URL || secrets.SERVER_URL || 'ws://localhost:8080' }}
+        run: |
+          set -o pipefail
+          for i in 1 2 3 4 5; do
+            echo "=== Build attempt $i of 5 ==="
+            if flutter build apk --release --dart-define=SERVER_URL="$SERVER_URL" 2>&1 | tee build.log; then
+              echo "Build succeeded on attempt $i"
+              exit 0
+            fi
+            if ! grep -qiE "429|too many requests|timed out|could not resolve|could not get|connection reset" build.log; then
+              echo "Build failed with a non-network error; not retrying."
+              exit 1
+            fi
+            echo "Looks like a transient network error. Retrying in 45s..."
+            sleep 45
+          done
+          echo "Build failed after 5 attempts"
+          exit 1
+
+      - name: Upload APK artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: signal-lost-apk
+          path: flutter/build/app/outputs/flutter-apk/app-release.apk
+          retention-days: 30
+
+      - name: Create GitHub Release with APK
+        if: github.event_name == 'workflow_dispatch'
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: v${{ github.run_number }}
+          name: Signal Lost v${{ github.run_number }}
+          files: flutter/build/app/outputs/flutter-apk/app-release.apk
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
