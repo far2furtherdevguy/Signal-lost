@@ -48,6 +48,23 @@ jobs:
           flutter create . --org com.signallost --project-name signal_lost --platforms android
           rm -rf test   # remove default template test (references template app class)
 
+      # flutter create only grants INTERNET in the debug manifest -
+      # release APKs need it injected into the main manifest or the
+      # app cannot open any network connection at all.
+      - name: Grant INTERNET permission (release)
+        working-directory: flutter
+        run: |
+          python3 - <<'EOF'
+          p = 'android/app/src/main/AndroidManifest.xml'
+          s = open(p).read()
+          if 'android.permission.INTERNET' not in s:
+              s = s.replace('<manifest ', '<manifest\n    <uses-permission android:name="android.permission.INTERNET"/> ', 1)
+              open(p, 'w').write(s)
+              print('INTERNET permission injected')
+          else:
+              print('INTERNET permission already present')
+          EOF
+
       - name: Analyze
         working-directory: flutter
         run: flutter analyze --no-fatal-infos
@@ -59,7 +76,7 @@ jobs:
         run: |
           for i in 1 2 3 4 5; do
             echo "=== Build attempt $i of 5 ==="
-            if flutter build apk --release               --dart-define=SERVER_URL=${{ vars.SERVER_URL || 'ws://localhost:8080' }}; then
+            if flutter build apk --release               --dart-define=SERVER_URL=${{ vars.SERVER_URL || secrets.SERVER_URL || 'ws://localhost:8080' }}; then
               echo "Build succeeded on attempt $i"
               exit 0
             fi
