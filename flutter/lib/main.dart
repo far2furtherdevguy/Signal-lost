@@ -196,10 +196,7 @@ class _SignalLostAppState extends State<SignalLostApp> {
           state = AppState.connecting;
           statusMsg = 'Disconnected. Reconnecting...';
         });
-        Future.delayed(const Duration(seconds: 2), () {
-          client.connect();
-          client.stream.listen(onMessage);
-        });
+        Future.delayed(const Duration(seconds: 3), () => client.connect());
         break;
     }
   }
@@ -281,6 +278,8 @@ class _SignalLostAppState extends State<SignalLostApp> {
           Text(title, style: const TextStyle(fontSize: 22, fontWeight: FontWeight.bold)),
           const SizedBox(height: 8),
           Text(sub, style: const TextStyle(color: Colors.white70)),
+          const SizedBox(height: 8),
+          Text('Server: $kServerUrl', style: const TextStyle(fontSize: 11, color: Colors.white38)),
           if (state == AppState.connecting) const Padding(padding: EdgeInsets.all(16), child: CircularProgressIndicator()),
           if (state == AppState.queue)
             Padding(
