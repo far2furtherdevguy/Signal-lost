@@ -28,6 +28,14 @@ jobs:
         working-directory: flutter
         run: flutter pub get
 
+      # We only keep lib/ + pubspec.yaml in the repo (no local setup),
+      # so generate the Android host project on the runner.
+      - name: Generate Android scaffolding
+        working-directory: flutter
+        run: |
+          flutter create . --org com.signallost --project-name signal_lost --platforms android
+          rm -rf test   # remove default template test (references template app class)
+
       - name: Analyze
         working-directory: flutter
         run: flutter analyze --no-fatal-infos
