@@ -24,6 +24,18 @@ jobs:
           channel: 'stable'
           cache: true
 
+      # Cache Gradle deps so Maven Central isn't hammered on every run
+      # (shared CI IPs get HTTP 429 rate-limited without this).
+      - name: Cache Gradle
+        uses: actions/cache@v4
+        with:
+          path: |
+            ~/.gradle/caches
+            ~/.gradle/wrapper
+          key: gradle-${{ runner.os }}-${{ hashFiles('flutter/android/**/*.gradle*', 'flutter/android/**/gradle-wrapper.properties', 'flutter/pubspec.yaml') }}
+          restore-keys: |
+            gradle-${{ runner.os }}-
+
       - name: Get dependencies
         working-directory: flutter
         run: flutter pub get
@@ -40,10 +52,22 @@ jobs:
         working-directory: flutter
         run: flutter analyze --no-fatal-infos
 
+      # Retry with backoff: Maven Central / Gradle Plugin Portal sometimes
+      # returns HTTP 429 (Too Many Requests) for shared runner IPs.
       - name: Build APK
         working-directory: flutter
         run: |
-          flutter build apk --release             --dart-define=SERVER_URL=${{ vars.SERVER_URL || 'ws://localhost:8080' }}
+          for i in 1 2 3 4 5; do
+            echo "=== Build attempt $i of 5 ==="
+            if flutter build apk --release               --dart-define=SERVER_URL=${{ vars.SERVER_URL || 'ws://localhost:8080' }}; then
+              echo "Build succeeded on attempt $i"
+              exit 0
+            fi
+            echo "Build failed (often a transient 429 from Maven). Retrying in 45s..."
+            sleep 45
+          done
+          echo "Build failed after 5 attempts"
+          exit 1
 
       - name: Upload APK artifact
         uses: actions/upload-artifact@v4
